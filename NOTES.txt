@@ -1,0 +1,33 @@
+# File map for Andronoma project
+
+# Documentation
+README_MASTER_SPEC.md
+  → Everything human-readable:
+    sections 0–3, 9–15, 17–21, 23–28
+
+# Spec-Kit files
+/spec/constitution.md
+/spec/product.spec.md
+/spec/plan.md
+/spec/tasks.md
+  → The four Spec-Kit files (section 4)
+
+# Environment template
+.env.example
+  → Section 5
+
+# Docker orchestration
+docker-compose.yml
+  → Section 6
+
+# Database schema
+/infra/migrations/0001_init.sql
+  → Section 7
+
+# API definition
+/api/openapi.yaml
+  → Section 8
+
+# Prompts
+/prompts/*.txt
+  → All LLM prompt templates (processing, audiences, creatives, image, scrape)
