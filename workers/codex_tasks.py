@@ -1,6 +1,7 @@
 """Codex automation tasks for the platform hardening batch."""
 from __future__ import annotations
 
+import uuid
 from typing import Iterable, List
 
 from celery import chain, shared_task
@@ -10,6 +11,8 @@ from sqlalchemy import select
 from shared.db import get_sync_session
 from shared.logs import emit_log
 from shared.models import PipelineRun, RunStatus
+from shared.pipeline import PIPELINE_ORDER
+from workers.constants import PLATFORM_HARDENING_QUEUE
 from workers.tasks import execute_pipeline_stage
 
 logger = get_task_logger(__name__)
@@ -77,14 +80,63 @@ PLATFORM_HARDENING_SEQUENCE: List = [
 
 def _immutable_signatures(run_id: str) -> Iterable:
     for task in PLATFORM_HARDENING_SEQUENCE:
-        yield task.si(run_id)
+        yield task.si(run_id).set(
+            queue=PLATFORM_HARDENING_QUEUE,
+            routing_key=PLATFORM_HARDENING_QUEUE,
+        )
+
+
+@shared_task(name="codex.platform_hardening.summary")
+def summarize_platform_hardening_run(run_id: str) -> dict:
+    """Log a completion summary once the platform hardening sequence finishes."""
+
+    run_uuid = uuid.UUID(run_id)
+    stage_order = {name: index for index, name in enumerate(PIPELINE_ORDER)}
+
+    with get_sync_session() as session:
+        run = session.get(PipelineRun, run_uuid)
+        if not run:
+            raise ValueError(f"Run {run_id} not found")
+
+        stages = sorted(
+            run.stages,
+            key=lambda state: stage_order.get(state.name, len(stage_order)),
+        )
+        stage_summaries = [
+            {
+                "name": state.name,
+                "status": state.status.value,
+                "started_at": state.started_at.isoformat() if state.started_at else None,
+                "finished_at": state.finished_at.isoformat() if state.finished_at else None,
+            }
+            for state in stages
+        ]
+
+        payload = {
+            "run_id": run_id,
+            "status": run.status.value,
+            "stages": stage_summaries,
+        }
+        emit_log(
+            session,
+            run.id,
+            "Platform hardening sequence completed",
+            metadata=payload,
+        )
+        return payload
 
 
 @shared_task(name="codex.platform_hardening.schedule_build")
 def schedule_platform_hardening_build(run_id: str) -> str:
     """Kick off the full platform hardening batch for the given run."""
 
-    workflow = chain(*_immutable_signatures(run_id))
+    workflow = chain(
+        *_immutable_signatures(run_id),
+        summarize_platform_hardening_run.si(run_id).set(
+            queue=PLATFORM_HARDENING_QUEUE,
+            routing_key=PLATFORM_HARDENING_QUEUE,
+        ),
+    )
     async_result = workflow.apply_async()
     logger.info(
         "Queued platform hardening build chain", extra={"run_id": run_id, "task_id": async_result.id}
