@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 from shared.models import RunStatus, StageStatus
 
@@ -31,6 +31,17 @@ class StageTelemetry(BaseModel):
 
     class Config:
         use_enum_values = True
+
+
+class StageUpdateRequest(BaseModel):
+    notes: str | None = None
+    status: StageStatus | None = None
+
+    @validator("notes")
+    def notes_must_not_be_empty(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("Notes cannot be empty")
+        return value
 
 
 class RunResponse(BaseModel):
