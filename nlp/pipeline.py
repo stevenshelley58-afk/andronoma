@@ -85,12 +85,17 @@ class AudienceStage(BaseStage):
         }
 
         if any(gap > 0 for gap in result.quota_gaps.values()):
+            session = self.context.session
             state = next((s for s in self.context.run.stages if s.name == self.name), None)
             if state:
                 existing = dict(state.telemetry or {})
                 existing.update(telemetry)
                 state.telemetry = existing
-                self.context.session.commit()
+            run = self.context.run
+            if not run.telemetry:
+                run.telemetry = {}
+            run.telemetry[self.name] = telemetry
+            session.commit()
             raise ValueError("Audience quotas not satisfied; see quota_gaps.csv for deficits")
 
         return telemetry
