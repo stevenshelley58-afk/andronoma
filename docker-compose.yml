@@ -40,7 +40,27 @@ services:
       - -c
       - >-
         pip install --no-cache-dir -r requirements.txt &&
-        celery -A workers.celery_app.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --queues=${CELERY_QUEUE_DEFAULT:-andronoma}
+        celery -A workers.celery_app.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --queues=${CELERY_QUEUE_DEFAULT:-andronoma},platform_hardening
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  hardening-worker:
+    image: python:3.11-slim
+    container_name: andronoma-hardening-worker
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command:
+      - bash
+      - -c
+      - >-
+        pip install --no-cache-dir -r requirements.txt &&
+        celery -A workers.celery_app.celery_app worker --loglevel=info --concurrency=2 --queues=platform_hardening
     env_file:
       - .env
     depends_on:
