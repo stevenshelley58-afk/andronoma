@@ -62,7 +62,7 @@ def emit_log(
         run_id=run_id,
         message=message,
         level=level,
-        metadata=metadata,
+        data=metadata,
     )
     session.add(entry)
     session.commit()
@@ -76,7 +76,7 @@ def emit_log(
                 "run_id": str(run_id),
                 "message": entry.message,
                 "level": entry.level,
-                "metadata": entry.metadata,
+                "metadata": entry.data,
                 "created_at": entry.created_at.isoformat(),
             },
         )
