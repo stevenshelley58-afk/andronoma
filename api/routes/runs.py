@@ -6,6 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from shared.db import get_sync_session
 from shared.models import (
@@ -22,6 +23,7 @@ from shared.pipeline import PIPELINE_ORDER
 from ..dependencies import get_current_user, get_db
 from ..schemas.assets import AssetListResponse, AssetRecordResponse
 from ..schemas.runs import (
+    RunBudgetUpdateRequest,
     RunCreateRequest,
     RunListResponse,
     RunResponse,
@@ -103,6 +105,40 @@ async def create_run(
     await session.commit()
     await session.refresh(run)
     return serialize_run(run)
+
+
+@router.patch("/{run_id}/budgets", response_model=RunResponse)
+async def update_run_budgets(
+    run_id: uuid.UUID,
+    payload: RunBudgetUpdateRequest,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RunResponse:
+    run = await session.get(PipelineRun, run_id)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if run.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    now = datetime.utcnow()
+    await session.execute(
+        PipelineRun.__table__
+        .update()
+        .where(PipelineRun.id == run_id)
+        .values(budgets=dict(payload.budgets), updated_at=now)
+    )
+    await session.commit()
+    session.expire_all()
+
+    result = await session.execute(
+        select(PipelineRun)
+        .options(selectinload(PipelineRun.stages))
+        .where(PipelineRun.id == run_id)
+    )
+    refreshed_run = result.scalar_one_or_none()
+    if not refreshed_run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return serialize_run(refreshed_run)
 
 
 @router.post("/{run_id}/start", response_model=RunResponse)
