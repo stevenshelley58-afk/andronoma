@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Dict
 
 from sqlalchemy import JSON, Column, DateTime, Enum, Float, ForeignKey, String, Text
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -62,7 +63,7 @@ class PipelineRun(Base):
     status = Column(Enum(RunStatus), default=RunStatus.PENDING, nullable=False)
     input_payload = Column(JSON, default=dict, nullable=False)
     budgets = Column(JSON, default=dict, nullable=False)
-    telemetry = Column(JSON, default=dict, nullable=False)
+    telemetry = Column(MutableDict.as_mutable(JSON), default=dict, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -80,7 +81,7 @@ class StageState(Base):
     status = Column(Enum(StageStatus), default=StageStatus.PENDING, nullable=False)
     started_at = Column(DateTime)
     finished_at = Column(DateTime)
-    telemetry = Column(JSON, default=dict, nullable=False)
+    telemetry = Column(MutableDict.as_mutable(JSON), default=dict, nullable=False)
     budget_spent = Column(Float, default=0.0, nullable=False)
     notes = Column(Text, default="")
 
