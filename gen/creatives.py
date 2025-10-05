@@ -172,6 +172,22 @@ def _sanitize_sentence(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _coerce_bool(value: Any) -> Optional[bool]:
+    """Best-effort coercion of flags that may arrive as strings or numbers."""
+
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "t", "yes", "y", "on", "allow", "allowed"}:
+            return True
+        if text in {"0", "false", "f", "no", "n", "off", "deny", "denied"}:
+            return False
+    return None
+
+
 def _load_csv_rows(path: Path) -> List[Dict[str, str]]:
     if not path.exists():
         return []
@@ -553,15 +569,18 @@ class CreativeStage(BaseStage):
         config = raw_config if isinstance(raw_config, Mapping) else {}
         metadata = config.get("metadata") if isinstance(config.get("metadata"), Mapping) else {}
 
-        promo_source = (
-            run_payload.get("PROMO_ALLOWED")
-            or run_payload.get("promo_allowed")
-            or (metadata.get("PROMO_ALLOWED") if isinstance(metadata, Mapping) else None)
-            or (metadata.get("promo_allowed") if isinstance(metadata, Mapping) else None)
-        )
-        promo_allowed = bool(promo_source) or (
-            str(run_payload.get("PROMO_ALLOWED", "")).lower() in {"1", "true", "yes", "on"}
-        )
+        promo_allowed = False
+        promo_candidates = [
+            run_payload.get("PROMO_ALLOWED"),
+            run_payload.get("promo_allowed"),
+        ]
+        if isinstance(metadata, Mapping):
+            promo_candidates.extend([metadata.get("PROMO_ALLOWED"), metadata.get("promo_allowed")])
+        for candidate in promo_candidates:
+            parsed = _coerce_bool(candidate)
+            if parsed is not None:
+                promo_allowed = parsed
+                break
 
         processing_data = (run.telemetry or {}).get("process", {}) if run.telemetry else {}
         fallback_voice = run_payload.get("brand_voice")
