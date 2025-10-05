@@ -4,17 +4,33 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db import get_sync_session
-from shared.models import PipelineRun, RunStatus, User, default_budgets
+from shared.models import PipelineRun, RunStatus, StageState, StageStatus, User, default_budgets
 from shared.pipeline import PIPELINE_ORDER
 
 from ..dependencies import get_current_user, get_db
-from ..schemas.runs import RunCreateRequest, RunListResponse, RunResponse, StageTelemetry
+from ..schemas.runs import (
+    RunCreateRequest,
+    RunListResponse,
+    RunResponse,
+    StageTelemetry,
+    StageUpdateRequest,
+)
 from ..services.pipeline import enqueue_pipeline, ensure_stage_records
 
 router = APIRouter(prefix="/runs", tags=["runs"])
+
+
+ALLOWED_STAGE_STATUS_TRANSITIONS: dict[StageStatus, set[StageStatus]] = {
+    StageStatus.PENDING: {StageStatus.RUNNING, StageStatus.SKIPPED},
+    StageStatus.RUNNING: {StageStatus.COMPLETED, StageStatus.FAILED, StageStatus.SKIPPED},
+    StageStatus.FAILED: {StageStatus.RUNNING, StageStatus.SKIPPED},
+    StageStatus.COMPLETED: set(),
+    StageStatus.SKIPPED: set(),
+}
 
 
 def serialize_run(run: PipelineRun) -> RunResponse:
@@ -119,3 +135,65 @@ async def get_run_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     await session.refresh(run)
     return serialize_run(run)
+
+
+@router.patch("/{run_id}/stages/{stage_name}", response_model=StageTelemetry)
+async def update_stage(
+    run_id: uuid.UUID,
+    stage_name: str,
+    payload: StageUpdateRequest,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> StageTelemetry:
+    run = await session.get(PipelineRun, run_id)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if run.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    result = await session.execute(
+        select(StageState).where(StageState.run_id == run.id, StageState.name == stage_name)
+    )
+    stage = result.scalar_one_or_none()
+    if not stage:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stage not found")
+
+    updated = False
+
+    if payload.notes is not None:
+        stage.notes = payload.notes
+        updated = True
+
+    if payload.status is not None:
+        current_status = stage.status
+        if payload.status != current_status:
+            allowed = ALLOWED_STAGE_STATUS_TRANSITIONS.get(current_status, set())
+            if payload.status not in allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid status transition",
+                )
+            stage.status = payload.status
+            now = datetime.utcnow()
+            if payload.status == StageStatus.RUNNING and stage.started_at is None:
+                stage.started_at = now
+            if payload.status in {StageStatus.COMPLETED, StageStatus.FAILED, StageStatus.SKIPPED}:
+                stage.finished_at = now
+            updated = True
+
+    if updated:
+        run.updated_at = datetime.utcnow()
+        await session.commit()
+        await session.refresh(stage)
+        await session.refresh(run)
+    else:
+        await session.refresh(stage)
+
+    return StageTelemetry(
+        name=stage.name,
+        status=stage.status,
+        started_at=stage.started_at,
+        finished_at=stage.finished_at,
+        telemetry=stage.telemetry or {},
+        notes=stage.notes,
+    )
