@@ -32,7 +32,7 @@ def get_current_user(
         return user
 
 
-async def get_run(session: AsyncSession = Depends(get_db), run_id: UUID) -> PipelineRun:
+async def get_run(run_id: UUID, session: AsyncSession = Depends(get_db)) -> PipelineRun:
     run = await session.get(PipelineRun, run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
