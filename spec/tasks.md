@@ -1,4 +1,4 @@
-# Task Batch — Pipeline Stages
+# Task Batch — Platform Hardening
 
 1. **Scrape stage foundation**
    - Provision the Celery task and FastAPI orchestration endpoint for the scrape stage.

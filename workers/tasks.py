@@ -30,8 +30,7 @@ def import_stage(stage_name: str) -> Type[BaseStage]:
     return getattr(module, class_name)
 
 
-@shared_task(name="pipeline.run_stage")
-def run_stage_task(run_id: str, stage_name: str) -> str:
+def execute_pipeline_stage(run_id: str, stage_name: str) -> str:
     stage_cls = import_stage(stage_name)
     run_uuid = uuid.UUID(run_id)
 
@@ -67,3 +66,8 @@ def run_stage_task(run_id: str, stage_name: str) -> str:
         emit_log(session, run.id, f"Stage {stage_name} finished")
 
     return stage_name
+
+
+@shared_task(name="pipeline.run_stage")
+def run_stage_task(run_id: str, stage_name: str) -> str:
+    return execute_pipeline_stage(run_id, stage_name)
