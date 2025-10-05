@@ -119,7 +119,7 @@ def default_budgets() -> Dict[str, float]:
     """Return a dictionary containing default per-stage budgets."""
 
     base = settings.budget_default
-    return {
+    budgets = {
         "scrape": base * 0.1,
         "process": base * 0.1,
         "audiences": base * 0.2,
@@ -128,3 +128,12 @@ def default_budgets() -> Dict[str, float]:
         "qa": base * 0.1,
         "export": base * 0.1,
     }
+
+    # Align the audience stage ceiling with the 300¢ requirement from the
+    # output generation spec. Earlier merges dropped the higher cap which
+    # causes the stricter AudienceStage.ensure_budget(300.0) guard to trip on
+    # default runs. Clamp to at least 300 so downstream stages continue to use
+    # percentage-based defaults while the audience stage respects the spec.
+    budgets["audiences"] = max(budgets["audiences"], 300.0)
+
+    return budgets
