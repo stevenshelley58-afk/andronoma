@@ -8,10 +8,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db import get_sync_session
-from shared.models import PipelineRun, RunStatus, StageState, StageStatus, User, default_budgets
+from shared.models import (
+    AssetRecord,
+    PipelineRun,
+    RunStatus,
+    StageState,
+    StageStatus,
+    User,
+    default_budgets,
+)
 from shared.pipeline import PIPELINE_ORDER
 
 from ..dependencies import get_current_user, get_db
+from ..schemas.assets import AssetListResponse, AssetRecordResponse
 from ..schemas.runs import (
     RunCreateRequest,
     RunListResponse,
@@ -135,6 +144,37 @@ async def get_run_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     await session.refresh(run)
     return serialize_run(run)
+
+
+@router.get("/{run_id}/assets", response_model=AssetListResponse)
+async def list_run_assets(
+    run_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AssetListResponse:
+    run = await session.get(PipelineRun, run_id)
+    if not run or run.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+
+    result = await session.execute(
+        select(AssetRecord)
+        .where(AssetRecord.run_id == run_id)
+        .order_by(AssetRecord.created_at.desc(), AssetRecord.id.desc())
+    )
+    records = result.scalars().all()
+    assets = [
+        AssetRecordResponse(
+            id=record.id,
+            run_id=record.run_id,
+            stage=record.stage,
+            asset_type=record.asset_type,
+            storage_key=record.storage_key,
+            metadata=record.extra or {},
+            created_at=record.created_at,
+        )
+        for record in records
+    ]
+    return AssetListResponse(assets=assets)
 
 
 @router.patch("/{run_id}/stages/{stage_name}", response_model=StageTelemetry)
