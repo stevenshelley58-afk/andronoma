@@ -1,0 +1,9 @@
+{
+  "required_files": [
+    "spec/SCRAPING_AND_RESEARCH.md",
+    "spec/PROCESSING_INSTRUCTIONS.md",
+    "spec/OUTPUT_GENERATION.md",
+    "spec/SCROLL_STOPPERS.md",
+    "spec/NANO_BANANA.md"
+  ]
+}
