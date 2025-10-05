@@ -67,9 +67,11 @@ class AudienceStage(BaseStage):
         telemetry: Dict[str, object] = {
             "total_audiences": len(result.records),
             "quota_counts": result.quota_counts,
+            "quota_requirements": result.quota_requirements,
             "quota_gaps": result.quota_gaps,
             "blocker_binding": result.blocker_binding_summary,
-            "suppressed_rows": len(result.suppressed),
+            "suppressed_count": len(result.suppressed),
+            "suppressed_rows": result.suppressed,
             "output_paths": {
                 "master": str(master_path),
                 "dedupe": str(dedupe_path),
