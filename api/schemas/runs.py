@@ -61,6 +61,16 @@ class StageUpdateRequest(BaseModel):
             raise ValueError("Notes cannot be empty")
         return value
 
+    @validator("telemetry")
+    def telemetry_must_be_object(
+        cls, value: Dict[str, Any] | None
+    ) -> Dict[str, Any] | None:
+        if value is None:
+            return value
+        if not isinstance(value, dict):
+            raise ValueError("Telemetry updates must be an object")
+        return value
+
     @validator("budget_spent")
     def budget_spent_must_be_non_negative(cls, value: float | None) -> float | None:
         if value is not None and value < 0:

@@ -305,11 +305,16 @@ async def update_stage(
         if stage.telemetry is None:
             stage.telemetry = {}
         stage.telemetry.update(payload.telemetry)
+
         if run.telemetry is None:
             run.telemetry = {}
-        stage_telemetry = run.telemetry.get(stage_name, {})
-        stage_telemetry.update(payload.telemetry)
-        run.telemetry[stage_name] = stage_telemetry
+
+        existing_run_telemetry = run.telemetry.get(stage_name)
+        if existing_run_telemetry is None:
+            run.telemetry[stage_name] = dict(payload.telemetry)
+        else:
+            merged_run_telemetry = {**existing_run_telemetry, **payload.telemetry}
+            run.telemetry[stage_name] = merged_run_telemetry
         updated = True
 
     if payload.budget_spent is not None:
