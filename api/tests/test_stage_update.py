@@ -94,14 +94,18 @@ def seeded_stage(session_factory: async_sessionmaker[AsyncSession]) -> SeededSta
                 status=RunStatus.RUNNING,
                 input_payload={},
                 budgets={},
-                telemetry={},
+                telemetry={
+                    stage_name: {"initial": True},
+                    "other": {"untouched": True},
+                },
             )
             stage = StageState(
                 id=stage_id,
                 run_id=run_id,
                 name=stage_name,
                 status=StageStatus.PENDING,
-                telemetry={},
+                telemetry={"existing": True},
+                budget_spent=1.0,
                 notes="",
             )
             session.add_all([user, run, stage])
@@ -168,6 +172,70 @@ def test_update_stage_status_to_skipped(
         payload = response.json()
         assert payload["status"] == StageStatus.SKIPPED.value
         assert payload["finished_at"] is not None
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_update_stage_telemetry_and_budget(
+    client: TestClient,
+    seeded_stage: SeededStage,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    owner = User(
+        id=seeded_stage.owner_id,
+        email="owner@example.com",
+        password_hash="hash",
+    )
+    app.dependency_overrides[get_current_user] = lambda: owner
+
+    try:
+        response = client.patch(
+            f"/runs/{seeded_stage.run_id}/stages/{seeded_stage.stage_name}",
+            json={
+                "telemetry": {"new_metric": 42},
+                "budget_spent": 12.5,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["telemetry"] == {"existing": True, "new_metric": 42}
+        assert payload["budget_spent"] == 12.5
+
+        async def fetch_state() -> tuple[StageState | None, PipelineRun | None]:
+            async with session_factory() as session:
+                stage_state = await session.get(StageState, seeded_stage.stage_id)
+                run_state = await session.get(PipelineRun, seeded_stage.run_id)
+                return stage_state, run_state
+
+        stage_state, run_state = asyncio.run(fetch_state())
+        assert stage_state is not None
+        assert stage_state.telemetry == {"existing": True, "new_metric": 42}
+        assert stage_state.budget_spent == 12.5
+        assert run_state is not None
+        stage_telemetry = run_state.telemetry.get(seeded_stage.stage_name, {})
+        assert stage_telemetry == {"initial": True, "new_metric": 42}
+        assert run_state.telemetry["other"] == {"untouched": True}
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_update_stage_rejects_negative_budget(
+    client: TestClient,
+    seeded_stage: SeededStage,
+) -> None:
+    owner = User(
+        id=seeded_stage.owner_id,
+        email="owner@example.com",
+        password_hash="hash",
+    )
+    app.dependency_overrides[get_current_user] = lambda: owner
+
+    try:
+        response = client.patch(
+            f"/runs/{seeded_stage.run_id}/stages/{seeded_stage.stage_name}",
+            json={"budget_spent": -1},
+        )
+        assert response.status_code == 422
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 
