@@ -42,6 +42,7 @@ class StageTelemetry(BaseModel):
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
     telemetry: Dict[str, Any] = Field(default_factory=dict)
+    budget_spent: float = 0.0
     notes: str = ""
 
     class Config:
@@ -51,11 +52,19 @@ class StageTelemetry(BaseModel):
 class StageUpdateRequest(BaseModel):
     notes: str | None = None
     status: StageStatus | None = None
+    telemetry: Dict[str, Any] | None = None
+    budget_spent: float | None = None
 
     @validator("notes")
     def notes_must_not_be_empty(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
             raise ValueError("Notes cannot be empty")
+        return value
+
+    @validator("budget_spent")
+    def budget_spent_must_be_non_negative(cls, value: float | None) -> float | None:
+        if value is not None and value < 0:
+            raise ValueError("Budget spend must be non-negative")
         return value
 
 

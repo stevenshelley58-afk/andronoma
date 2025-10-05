@@ -59,7 +59,8 @@ def serialize_run(run: PipelineRun) -> RunResponse:
                 status=stage.status,
                 started_at=stage.started_at,
                 finished_at=stage.finished_at,
-                telemetry=stage.telemetry,
+                telemetry=stage.telemetry or {},
+                budget_spent=stage.budget_spent,
                 notes=stage.notes,
             )
             for stage in sorted(
@@ -300,6 +301,21 @@ async def update_stage(
                 stage.finished_at = now
             updated = True
 
+    if payload.telemetry is not None:
+        if stage.telemetry is None:
+            stage.telemetry = {}
+        stage.telemetry.update(payload.telemetry)
+        if run.telemetry is None:
+            run.telemetry = {}
+        stage_telemetry = run.telemetry.get(stage_name, {})
+        stage_telemetry.update(payload.telemetry)
+        run.telemetry[stage_name] = stage_telemetry
+        updated = True
+
+    if payload.budget_spent is not None:
+        stage.budget_spent = payload.budget_spent
+        updated = True
+
     if updated:
         run.updated_at = datetime.utcnow()
         await session.commit()
@@ -314,5 +330,6 @@ async def update_stage(
         started_at=stage.started_at,
         finished_at=stage.finished_at,
         telemetry=stage.telemetry or {},
+        budget_spent=stage.budget_spent,
         notes=stage.notes,
     )

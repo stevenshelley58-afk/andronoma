@@ -365,6 +365,8 @@ components:
         telemetry:
           type: object
           additionalProperties: {}
+        budget_spent:
+          type: number
         notes:
           type: string
           example: Awaiting QA signal
