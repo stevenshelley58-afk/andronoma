@@ -169,6 +169,49 @@ async def start_run(
     return serialize_run(run)
 
 
+@router.post("/{run_id}/cancel", response_model=RunResponse)
+async def cancel_run(
+    run_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RunResponse:
+    run = await session.get(
+        PipelineRun,
+        run_id,
+        options=(selectinload(PipelineRun.stages),),
+    )
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if run.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if run.status not in {RunStatus.PENDING, RunStatus.RUNNING}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Run cannot be cancelled in its current status",
+        )
+
+    now = datetime.utcnow()
+    run.status = RunStatus.CANCELLED
+    run.updated_at = now
+
+    for stage in run.stages:
+        if stage.status in {StageStatus.PENDING, StageStatus.RUNNING}:
+            stage.status = StageStatus.SKIPPED
+            stage.finished_at = now
+
+    await session.commit()
+
+    result = await session.execute(
+        select(PipelineRun)
+        .options(selectinload(PipelineRun.stages))
+        .where(PipelineRun.id == run_id)
+    )
+    refreshed_run = result.scalar_one_or_none()
+    if not refreshed_run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return serialize_run(refreshed_run)
+
+
 @router.get("/{run_id}", response_model=RunResponse)
 async def get_run_detail(
     run_id: uuid.UUID,
