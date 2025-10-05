@@ -96,7 +96,7 @@ class RunLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     level = Column(String(16), default="info", nullable=False)
     message = Column(Text, nullable=False)
-    metadata = Column(JSON, default=dict, nullable=False)
+    data = Column("metadata", JSON, default=dict, nullable=False)
 
     run = relationship("PipelineRun", back_populates="logs")
 
