@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field("HS256", description="Token signing algorithm")
     telemetry_namespace: str = Field("andronoma", description="Telemetry namespace")
     budget_default: float = Field(1000.0, description="Fallback campaign budget")
+    export_bundle_ttl_seconds: int = Field(
+        900, description="TTL (in seconds) for generated export bundle signed URLs"
+    )
+    google_sheets_export_url: str | None = Field(
+        None,
+        description="Optional Google Sheets workbook URL to mirror CSV exports",
+    )
+    meta_export_url: str | None = Field(
+        None,
+        description="Optional Meta export template or asset library URL",
+    )
 
     class Config:
         env_prefix = "ANDRONOMA_"

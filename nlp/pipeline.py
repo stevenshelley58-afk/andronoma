@@ -1,4 +1,4 @@
-"""NLP enrichment stage."""
+"""NLP enrichment stages for the processing and audience synthesis pipeline."""
 from __future__ import annotations
 
 import json
@@ -13,6 +13,8 @@ from .audiences import generate_audience_plan
 
 
 class ProcessStage(BaseStage):
+    """Summarize upstream research into key insights for downstream stages."""
+
     name = "process"
 
     def execute(self) -> Dict[str, float]:
@@ -21,12 +23,16 @@ class ProcessStage(BaseStage):
 
 
 class AudienceStage(BaseStage):
+    """Synthesize audience plans and persist quota telemetry."""
+
     name = "audiences"
 
     def execute(self) -> Dict[str, object]:
         self.ensure_budget(300.0)
 
-        processed_insights = self.context.run.telemetry.get("process", {}) if self.context.run.telemetry else {}
+        processed_insights = (
+            self.context.run.telemetry.get("process", {}) if self.context.run.telemetry else {}
+        )
         result = generate_audience_plan(processed_insights, target_count=120)
 
         output_dir = Path("outputs/audiences")
