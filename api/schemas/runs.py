@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, validator
 
 from shared.models import RunStatus, StageStatus
+from shared.pipeline import PIPELINE_ORDER
 
 
 class PipelineConfig(BaseModel):
@@ -19,6 +20,20 @@ class PipelineConfig(BaseModel):
 class RunCreateRequest(BaseModel):
     config: PipelineConfig
     budgets: Dict[str, float] | None = None
+
+
+class RunBudgetUpdateRequest(BaseModel):
+    budgets: Dict[str, float]
+
+    @validator("budgets")
+    def validate_budgets(cls, value: Dict[str, float]) -> Dict[str, float]:
+        allowed_stages = set(PIPELINE_ORDER)
+        for stage, amount in value.items():
+            if stage not in allowed_stages:
+                raise ValueError(f"Unknown stage '{stage}'")
+            if amount < 0:
+                raise ValueError("Budget allocations must be non-negative")
+        return value
 
 
 class StageTelemetry(BaseModel):
