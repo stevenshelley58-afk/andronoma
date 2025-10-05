@@ -1,0 +1,24 @@
+name: image_art_direction
+stage: images
+description: Produce art direction and overlay guidance for generated stills.
+inputs:
+  - creative_concepts
+  - brand_visuals
+  - overlay_requirements
+output: structured_json
+template: |-
+  You are generating art direction briefs for 1080x1350 images to accompany the creative concepts below:
+  {creative_concepts}
+
+  Visual assets and brand references:
+  {brand_visuals}
+
+  Overlay requirements:
+  {overlay_requirements}
+
+  For each concept, output JSON objects with keys:
+    - "concept_id": identifier from the input list.
+    - "scene_description": grounded, photoreal description of the scene.
+    - "composition_notes": framing, perspective, and lighting.
+    - "overlay": {"headline", "subcopy", "cta", "placement"} respecting safe areas.
+    - "style_tags": array of 3-5 descriptive tags.

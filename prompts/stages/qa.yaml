@@ -1,0 +1,28 @@
+name: qa_validator
+stage: qa
+description: Run automated QA heuristics across generated outputs before export.
+inputs:
+  - audiences_csv
+  - creatives_csv
+  - image_manifests
+  - policy_constraints
+output: structured_json
+template: |-
+  You are the QA automation layer reviewing generated campaign assets.
+  Evaluate the following audiences CSV:
+  {audiences_csv}
+
+  Evaluate the following creatives CSV:
+  {creatives_csv}
+
+  Image manifests:
+  {image_manifests}
+
+  Apply these policy constraints:
+  {policy_constraints}
+
+  Return JSON with:
+    - "audience_findings": array of {"row", "issue", "severity", "recommendation"}.
+    - "creative_findings": same structure as above.
+    - "image_findings": same structure as above plus "fix" suggestions.
+    - "overall_status": pass/fail plus summary commentary.

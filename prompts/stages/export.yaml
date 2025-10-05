@@ -1,0 +1,30 @@
+name: export_summary
+stage: export
+description: Craft the executive summary and export manifest accompanying deliverables.
+inputs:
+  - audiences_csv
+  - creatives_csv
+  - qa_report
+  - bundle_manifest
+output: markdown
+template: |-
+  You are preparing the executive summary and export manifest for a completed Andronoma run.
+
+  Audiences CSV preview:
+  {audiences_csv}
+
+  Creatives CSV preview:
+  {creatives_csv}
+
+  QA report summary:
+  {qa_report}
+
+  Bundle manifest metadata:
+  {bundle_manifest}
+
+  Create Markdown with sections:
+    1. **Run Overview** — high-level objectives and success metrics.
+    2. **Audience Insights** — highlight quota coverage and standout segments.
+    3. **Creative Themes** — summarize creative buckets and narrative arcs.
+    4. **QA Status** — outline blockers, fixes applied, and outstanding risks.
+    5. **Delivery Checklist** — bullet list referencing exported assets and destinations (CSV, Sheets, Meta uploads).

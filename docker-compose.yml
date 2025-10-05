@@ -1,0 +1,184 @@
+version: '3.9'
+
+services:
+  api:
+    image: python:3.11-slim
+    container_name: andronoma-api
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command:
+      - bash
+      - -c
+      - >-
+        pip install --no-cache-dir -r requirements.txt &&
+        uvicorn api.main:app --host ${ANDRONOMA_API_HOST:-0.0.0.0} --port ${ANDRONOMA_API_PORT:-8000} --reload
+    env_file:
+      - .env
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+
+  worker:
+    image: python:3.11-slim
+    container_name: andronoma-worker
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command:
+      - bash
+      - -c
+      - >-
+        pip install --no-cache-dir -r requirements.txt &&
+        celery -A workers.celery_app.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --queues=${CELERY_QUEUE_DEFAULT:-andronoma}
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  beat:
+    image: python:3.11-slim
+    container_name: andronoma-beat
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command:
+      - bash
+      - -c
+      - >-
+        pip install --no-cache-dir -r requirements.txt &&
+        celery -A workers.celery_app.celery_app beat --loglevel=info
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  flower:
+    image: mher/flower:latest
+    container_name: andronoma-flower
+    environment:
+      - CELERY_BROKER_URL=${ANDRONOMA_BROKER_URL}
+      - FLOWER_PORT=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:15
+    container_name: andronoma-postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: andronoma-redis
+    command: redis-server --save '' --appendonly no
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2024-04-18T19-09-19Z
+    container_name: andronoma-minio
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  minio-setup:
+    image: minio/mc:RELEASE.2024-04-18T19-09-19Z
+    container_name: andronoma-minio-setup
+    depends_on:
+      minio:
+        condition: service_started
+    env_file:
+      - .env
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}; do sleep 1; done;
+      mc mb -p local/${ANDRONOMA_MINIO_BUCKET};
+      mc mb -p local/${MINIO_BUCKET_RAW};
+      mc mb -p local/${MINIO_BUCKET_PROCESSED};
+      mc mb -p local/${MINIO_BUCKET_OUTPUTS};
+      exit 0;"
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.86.0
+    container_name: andronoma-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./infra/observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: andronoma-prometheus
+    volumes:
+      - ./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=2d"
+    ports:
+      - "9090:9090"
+    depends_on:
+      otel-collector:
+        condition: service_started
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: andronoma-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  minio_data:
+  grafana_data:

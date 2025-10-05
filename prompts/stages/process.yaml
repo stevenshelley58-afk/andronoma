@@ -1,0 +1,28 @@
+name: insight_processing
+stage: process
+description: Transform research artifacts into the structured positioning analysis required by downstream stages.
+inputs:
+  - research_summary
+  - sentiment_highlights
+  - quantitative_findings
+  - brand_goals
+output: structured_json
+template: |-
+  You are the processing agent turning research into actionable strategy.
+  Using the provided research summary:
+  {research_summary}
+
+  Account for notable sentiments:
+  {sentiment_highlights}
+
+  And quantitative signals:
+  {quantitative_findings}
+
+  Respect the brand goals:
+  {brand_goals}
+
+  Return JSON with:
+    - "positioning_pillars": array of {"pillar", "evidence", "implications"}.
+    - "motivation_map": object keyed by Feelings, Functional, Social, Aspiration with bullet arrays.
+    - "blockers": array of blockers sorted by severity with recommended counter-messaging.
+    - "market_summary": concise synthesis of category dynamics and whitespace.

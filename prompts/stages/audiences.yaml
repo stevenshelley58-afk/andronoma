@@ -1,0 +1,26 @@
+name: audience_generation
+stage: audiences
+description: Produce a diversified, quota-aware audience matrix aligned with positioning outputs.
+inputs:
+  - positioning_pillars
+  - motivation_map
+  - blockers
+  - market_summary
+output: csv_rows
+template: |-
+  You are designing performance marketing audiences for a paid acquisition sprint.
+  Consider the positioning pillars:
+  {positioning_pillars}
+
+  Motivation map:
+  {motivation_map}
+
+  Blockers to solve:
+  {blockers}
+
+  Market context:
+  {market_summary}
+
+  Generate at least 120 audiences and format the response as CSV with the columns:
+  "#,Audience Name,Who They Are,Seed Terms,Primary Motivation,Top 2 Blockers,Message Angle,Creative Concept,Format Notes,Proof/Offer,Success Metric,A/B Variable,Exclusions".
+  Ensure quotas per the specification and annotate blocker bindings inline.
