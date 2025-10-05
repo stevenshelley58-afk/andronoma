@@ -1,0 +1,28 @@
+name: scrape_research
+stage: scrape
+description: Collect brand, product, and competitive insights from the provided surfaces.
+inputs:
+  - brand_url
+  - crawl_constraints
+  - research_brief
+  - previous_findings
+output: structured_json
+template: |-
+  You are the research agent for the Andronoma pipeline.
+  Crawl and summarize the most salient findings for the brand at {brand_url} while respecting the crawl constraints below.
+
+  CRAWL CONSTRAINTS:
+  {crawl_constraints}
+
+  OBJECTIVES:
+  {research_brief}
+
+  PREVIOUS FINDINGS TO AVOID DUPLICATING:
+  {previous_findings}
+
+  Produce structured JSON with keys:
+    - "brand_voice": synopsis of tone and signature phrases.
+    - "product_highlights": array of bullet strings with key differentiators.
+    - "competitive_landscape": array of competitor entries with name, positioning, and pricing notes.
+    - "customer_language": snippets capturing authentic phrasing from reviews or communities.
+    - "opportunities": hypotheses about whitespace or under-served needs.

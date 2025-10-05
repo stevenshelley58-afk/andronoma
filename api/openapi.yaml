@@ -1,0 +1,376 @@
+openapi: 3.1.0
+info:
+  title: Andronoma Platform API
+  version: 0.1.0
+  description: |
+    Orchestration surface for the Andronoma campaign pipeline. All endpoints are
+    versionless for now and secured via bearer tokens that map to session
+    records. The service exposes helpers for discovering the pipeline ordering,
+    launching runs, inspecting telemetry, and streaming structured logs.
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+security:
+  - bearerAuth: []
+tags:
+  - name: meta
+    description: Readiness and configuration helpers.
+  - name: auth
+    description: Authentication and session lifecycle.
+  - name: runs
+    description: Pipeline orchestration and telemetry APIs.
+  - name: logs
+    description: Server-sent event streams for run logs.
+paths:
+  /health:
+    get:
+      tags: [meta]
+      summary: Service health probe
+      description: Lightweight liveness endpoint for container orchestrators.
+      security: []
+      responses:
+        '200':
+          description: Service is ready to accept requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+  /settings:
+    get:
+      tags: [meta]
+      summary: Return the effective configuration
+      description: Echoes the merged settings object to assist the frontend and ops tooling.
+      security: []
+      responses:
+        '200':
+          description: Current configuration values.
+          content:
+            application/json:
+              schema:
+                type: object
+  /pipeline:
+    get:
+      tags: [meta]
+      summary: List the pipeline stages in execution order
+      description: Returns the canonical stage ordering used by workers and UI clients.
+      security: []
+      responses:
+        '200':
+          description: Ordered pipeline stages.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stages:
+                    type: array
+                    items:
+                      type: string
+                    example:
+                      - scrape
+                      - process
+                      - audiences
+                      - creatives
+                      - images
+                      - qa
+                      - export
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Register a new user
+      description: Creates a user account and returns the persisted identity.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: User was created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '409':
+          description: Email is already registered.
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Exchange credentials for an access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials.
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Resolve the current authenticated user
+      responses:
+        '200':
+          description: Authenticated user profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Missing or invalid token.
+  /runs:
+    get:
+      tags: [runs]
+      summary: List runs owned by the authenticated user
+      responses:
+        '200':
+          description: Collection of pipeline runs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunListResponse'
+    post:
+      tags: [runs]
+      summary: Create a new pipeline run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCreateRequest'
+      responses:
+        '201':
+          description: Run record created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+  /runs/{run_id}:
+    get:
+      tags: [runs]
+      summary: Retrieve details for a pipeline run
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The requested run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '404':
+          description: Run not found or forbidden.
+  /runs/{run_id}/start:
+    post:
+      tags: [runs]
+      summary: Transition a run into the active state and enqueue workers
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Run state after attempting to start.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '400':
+          description: Run is already active.
+        '403':
+          description: Forbidden for current user.
+        '404':
+          description: Run not found.
+  /runs/{run_id}/logs/stream:
+    get:
+      tags: [logs]
+      summary: Stream run logs in real time
+      description: Emits server-sent events where each event payload is JSON containing the log metadata.
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Event stream of log entries.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+      x-streaming: true
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: UUID
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: founder@example.com
+        password:
+          type: string
+          format: password
+          example: changeme123
+    LoginResponse:
+      type: object
+      required: [access_token, token_type]
+      properties:
+        access_token:
+          type: string
+          description: Session token to use in the Authorization header.
+        token_type:
+          type: string
+          example: bearer
+    UserResponse:
+      type: object
+      required: [id, email]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+    PipelineConfig:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          example: Summer launch sprint
+        objectives:
+          type: array
+          items:
+            type: string
+          example:
+            - Validate positioning against core personas
+            - Launch creative exploration sprint
+        target_markets:
+          type: array
+          items:
+            type: string
+          example:
+            - US
+            - CA
+        metadata:
+          type: object
+          additionalProperties: {}
+    RunCreateRequest:
+      type: object
+      required: [config]
+      properties:
+        config:
+          $ref: '#/components/schemas/PipelineConfig'
+        budgets:
+          type: object
+          additionalProperties:
+            type: number
+            format: float
+    RunListResponse:
+      type: object
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunResponse'
+    RunResponse:
+      type: object
+      required:
+        - id
+        - status
+        - input_payload
+        - budgets
+        - telemetry
+        - created_at
+        - updated_at
+        - stages
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        input_payload:
+          type: object
+          additionalProperties: {}
+        budgets:
+          type: object
+          additionalProperties:
+            type: number
+        telemetry:
+          type: object
+          additionalProperties: {}
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/StageTelemetry'
+    StageTelemetry:
+      type: object
+      required:
+        - name
+        - status
+        - telemetry
+        - notes
+      properties:
+        name:
+          type: string
+        status:
+          $ref: '#/components/schemas/StageStatus'
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        telemetry:
+          type: object
+          additionalProperties: {}
+        notes:
+          type: string
+          example: Awaiting QA signal
+    RunStatus:
+      type: string
+      enum: [pending, running, completed, failed, cancelled]
+    StageStatus:
+      type: string
+      enum: [pending, running, completed, failed, skipped]

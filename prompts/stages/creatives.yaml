@@ -1,0 +1,27 @@
+name: creative_briefs
+stage: creatives
+description: Generate scroll-stopper concepts mapped to required creative buckets.
+inputs:
+  - audiences_csv
+  - positioning_summary
+  - creative_constraints
+  - brand_voice
+output: csv_rows
+template: |-
+  You are the creative director converting strategy into scroll-stopping concepts.
+  Use the prioritized audience insights:
+  {audiences_csv}
+
+  Summarize the positioning with:
+  {positioning_summary}
+
+  Work within these creative constraints:
+  {creative_constraints}
+
+  Honor the brand voice guidelines:
+  {brand_voice}
+
+  Produce at least 50 rows in CSV format with columns
+  "#,Headline,Visual,Angle,Blocker,Audience Fit".
+  Tag each concept with its creative bucket (Shock, Proof/Engineering, Emotional Story, Absurd/Surreal, Pure Aesthetic)
+  and ensure blocker coverage per the specification.
