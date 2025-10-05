@@ -1,61 +1,71 @@
-import sys, csv, pathlib, re
+"""CLI hook that reuses the QA validator library."""
+from __future__ import annotations
 
-# Config
-DISALLOWED_PROMO = ["% off", "discount", "sale", "limited offer"]
-HEADLINE_MIN, HEADLINE_MAX = 3, 10
+import sys
+from pathlib import Path
 
-def has_promo(text: str) -> bool:
-    t = text.lower()
-    return any(p in t for p in DISALLOWED_PROMO)
+from qa.result import CheckResult, CheckSeverity
+from qa.validators import (
+    check_cta_presence,
+    check_headline_length,
+    check_promo_language,
+    load_csv_records,
+    validate_image_legibility,
+)
 
-def main():
-    root = pathlib.Path(".")
+
+def run_checks(root: Path | None = None) -> list[CheckResult]:
+    """Execute creative readiness checks and return detailed results."""
+
+    root = root or Path(".")
     csv_path = root / "outputs" / "creatives" / "scroll_stoppers.csv"
-    img_dir  = root / "outputs" / "creatives" / "images"
-    failures = []
+    image_dir = root / "outputs" / "creatives" / "images"
 
-    if not csv_path.exists():
-        print("FAIL: missing scroll_stoppers.csv"); sys.exit(1)
-    if not img_dir.exists():
-        print("FAIL: missing images directory"); sys.exit(1)
+    results: list[CheckResult] = []
+    if csv_path.exists():
+        records = load_csv_records(csv_path)
+        results.extend(
+            [
+                check_headline_length(records),
+                check_cta_presence(records),
+                check_promo_language(records),
+            ]
+        )
+    else:
+        results.append(
+            CheckResult(
+                name="Creative CSV presence",
+                kind="creative_presence",
+                severity=CheckSeverity.BLOCKER,
+                message="outputs/creatives/scroll_stoppers.csv missing",
+                remediation="Run the creative generation stage before executing QA.",
+            )
+        )
 
-    with csv_path.open(encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        seen_headlines = set()
-        for i, row in enumerate(reader, start=2):
-            h = (row.get("Headline") or "").strip()
-            v = (row.get("Visual") or "").strip()
-            a = (row.get("Angle") or "").strip()
-            b = (row.get("Blocker") or "").strip()
-            cta = re.findall(r"\b(Shop|See|Explore|Discover|Find|Get)\b.*", h + " " + a, flags=re.I)
+    image_files = []
+    if image_dir.exists():
+        image_files = [
+            path
+            for path in image_dir.iterdir()
+            if path.suffix.lower() in {".png", ".jpg", ".jpeg"}
+        ]
+    results.append(validate_image_legibility(image_files))
+    return results
 
-            # Headline length
-            wc = len(h.split())
-            if wc < HEADLINE_MIN or wc > HEADLINE_MAX:
-                failures.append(f"Row {i}: headline word count {wc} outside [{HEADLINE_MIN},{HEADLINE_MAX}]")
 
-            # Value/Proof presence heuristic
-            if not any(k in (h + " " + a).lower() for k in ["proof","review","rating","guarantee","craft","fit","durable","returns","free shipping"]):
-                # allow absence if visual carries proof (heuristic weak, flag as warn)
-                pass
-
-            # CTA present and non-promo
-            if not cta:
-                failures.append(f"Row {i}: CTA missing or unclear")
-            if has_promo(h) or has_promo(a):
-                failures.append(f"Row {i}: disallowed promo CTA")
-
-        # Image presence check (basic)
-        if not any(img_dir.glob("*.jpg")) and not any(img_dir.glob("*.jpeg")) and not any(img_dir.glob("*.png")):
-            failures.append("No rendered images found")
-
+def main() -> None:
+    results = run_checks()
+    failures = [result for result in results if result.is_failure()]
     if failures:
         print("FAIL ad_readiness_check")
-        for f in failures:
-            print("-", f)
+        for result in results:
+            prefix = (
+                "BLOCKER" if result.severity is CheckSeverity.BLOCKER else result.severity.value.upper()
+            )
+            print(f"- {prefix}: {result.message}")
         sys.exit(1)
-
     print("PASS ad_readiness_check")
+
 
 if __name__ == "__main__":
     main()
