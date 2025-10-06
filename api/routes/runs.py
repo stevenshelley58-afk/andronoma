@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -32,6 +32,16 @@ from ..schemas.runs import (
 )
 from ..services.pipeline import enqueue_pipeline, ensure_stage_records
 
+
+def _ensure_utc(dt: datetime | None) -> datetime | None:
+    """Normalize datetimes to timezone-aware UTC."""
+
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 
@@ -51,14 +61,14 @@ def serialize_run(run: PipelineRun) -> RunResponse:
         input_payload=run.input_payload,
         budgets=run.budgets,
         telemetry=run.telemetry,
-        created_at=run.created_at,
-        updated_at=run.updated_at,
+        created_at=_ensure_utc(run.created_at),
+        updated_at=_ensure_utc(run.updated_at),
         stages=[
             StageTelemetry(
                 name=stage.name,
                 status=stage.status,
-                started_at=stage.started_at,
-                finished_at=stage.finished_at,
+                started_at=_ensure_utc(stage.started_at),
+                finished_at=_ensure_utc(stage.finished_at),
                 telemetry=stage.telemetry or {},
                 budget_spent=stage.budget_spent,
                 notes=stage.notes,
@@ -121,7 +131,7 @@ async def update_run_budgets(
     if run.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     await session.execute(
         PipelineRun.__table__
         .update()
@@ -157,7 +167,7 @@ async def start_run(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Run already active")
 
     run.status = RunStatus.RUNNING
-    run.updated_at = datetime.utcnow()
+    run.updated_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(run)
 
@@ -191,7 +201,7 @@ async def cancel_run(
             detail="Run cannot be cancelled in its current status",
         )
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     run.status = RunStatus.CANCELLED
     run.updated_at = now
 
@@ -301,7 +311,7 @@ async def update_stage(
                     detail="Invalid status transition",
                 )
             stage.status = payload.status
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             if payload.status == StageStatus.RUNNING and stage.started_at is None:
                 stage.started_at = now
             if payload.status in {StageStatus.COMPLETED, StageStatus.FAILED, StageStatus.SKIPPED}:
@@ -326,7 +336,7 @@ async def update_stage(
         updated = True
 
     if updated:
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         run.updated_at = now
         if stage_status_changed:
             await session.flush()

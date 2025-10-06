@@ -475,7 +475,7 @@ class ScrapeStage(BaseStage):
     ) -> str:
         manifest = {
             "run_id": str(run_id),
-            "generated_at": dt.datetime.utcnow().isoformat(),
+            "generated_at": dt.datetime.now(dt.UTC).isoformat(),
             "datasets": entries,
             "coverage": coverage,
             "crawler_metrics": metrics,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import AsyncIterator
 from uuid import UUID, uuid4
@@ -79,7 +79,7 @@ def seeded_data(session_factory: async_sessionmaker[AsyncSession]) -> SeededRun:
     owner_id = uuid4()
     run_id = uuid4()
     log_ids = [uuid4(), uuid4(), uuid4()]
-    created = datetime.utcnow()
+    created = datetime.now(UTC)
 
     async def seed() -> None:
         async with session_factory() as session:
