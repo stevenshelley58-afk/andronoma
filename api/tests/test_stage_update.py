@@ -213,7 +213,11 @@ def test_update_stage_telemetry_and_budget(
         assert stage_state.budget_spent == 12.5
         assert run_state is not None
         stage_telemetry = run_state.telemetry.get(seeded_stage.stage_name, {})
-        assert stage_telemetry == {"initial": True, "new_metric": 42}
+        assert stage_telemetry == {
+            "initial": True,
+            "new_metric": 42,
+            "budget_spent": 12.5,
+        }
         assert run_state.telemetry["other"] == {"untouched": True}
     finally:
         app.dependency_overrides.pop(get_current_user, None)
@@ -344,6 +348,71 @@ def test_update_stage_telemetry_replaces_non_mapping_run_entry(
         assert stage_state.telemetry == {"metric": 1}
         assert run_state is not None
         assert run_state.telemetry[stage_name] == {"metric": 1}
+        assert run_state.telemetry["other"] == {"keep": True}
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_update_stage_budget_creates_run_entry(
+    client: TestClient,
+    seeded_stage: SeededStage,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    owner = User(
+        id=seeded_stage.owner_id,
+        email="owner@example.com",
+        password_hash="hash",
+    )
+    app.dependency_overrides[get_current_user] = lambda: owner
+
+    budget_only_run_id = uuid4()
+    budget_only_stage_id = uuid4()
+    stage_name = "ads"
+
+    async def seed_stage_without_telemetry() -> None:
+        async with session_factory() as session:
+            run = PipelineRun(
+                id=budget_only_run_id,
+                owner_id=seeded_stage.owner_id,
+                status=RunStatus.RUNNING,
+                input_payload={},
+                budgets={},
+                telemetry={stage_name: "unexpected", "other": {"keep": True}},
+            )
+            stage = StageState(
+                id=budget_only_stage_id,
+                run_id=budget_only_run_id,
+                name=stage_name,
+                status=StageStatus.PENDING,
+                telemetry={},
+                budget_spent=0.0,
+                notes="",
+            )
+            session.add_all([run, stage])
+            await session.commit()
+
+    asyncio.run(seed_stage_without_telemetry())
+
+    try:
+        response = client.patch(
+            f"/runs/{budget_only_run_id}/stages/{stage_name}",
+            json={"budget_spent": 9.75},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["budget_spent"] == 9.75
+
+        async def fetch_state() -> tuple[StageState | None, PipelineRun | None]:
+            async with session_factory() as session:
+                stage_state = await session.get(StageState, budget_only_stage_id)
+                run_state = await session.get(PipelineRun, budget_only_run_id)
+                return stage_state, run_state
+
+        stage_state, run_state = asyncio.run(fetch_state())
+        assert stage_state is not None
+        assert stage_state.budget_spent == 9.75
+        assert run_state is not None
+        assert run_state.telemetry[stage_name] == {"budget_spent": 9.75}
         assert run_state.telemetry["other"] == {"keep": True}
     finally:
         app.dependency_overrides.pop(get_current_user, None)
