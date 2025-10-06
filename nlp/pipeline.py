@@ -6,9 +6,11 @@ import hashlib
 import json
 import re
 import time
-from collections import Counter
+import uuid
+from collections import Counter, OrderedDict
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from itertools import cycle
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 from urllib.parse import urlparse
 
 from sqlalchemy import select
@@ -18,6 +20,8 @@ from shared.models import AssetRecord
 from shared.stages.base import BaseStage
 
 from . import ad_readiness, brand_fit, conversion_hypotheses
+from outputs.csv import write_records
+from qa.validators import REQUIRED_AUDIENCE_COLUMNS, validate_audience_quotas
 
 
 class ProcessStage(BaseStage):
@@ -836,6 +840,461 @@ class ProcessStage(BaseStage):
 class AudienceStage(BaseStage):
     name = "audiences"
 
-    def execute(self) -> Dict[str, int]:
+    MIN_RECORDS = 100
+    TARGET_RECORDS = 140
+    GAP_THRESHOLD_MOTIVATION = 0.45
+    GAP_THRESHOLD_BLOCKER = 0.35
+    OUTPUT_PATH = Path("outputs/audiences/audiences_master.csv")
+    PROCESSED_ROOT = Path("/data/processed")
+
+    DEFAULT_PERSONAS = [
+        "Growth-minded operators",
+        "Marketing leadership",
+        "Lifecycle strategists",
+        "Acquisition specialists",
+    ]
+    FORMAT_NOTES = [
+        "Meta Advantage+ with lookalike expansion",
+        "TikTok Spark Ads highlighting community proof",
+        "Meta carousel sequencing blocker flips",
+        "Short-form UGC with testimonial stitch",
+        "LinkedIn thought leadership carousel",
+    ]
+    SUCCESS_METRICS = [
+        "Qualified lead volume",
+        "Add-to-cart conversion",
+        "Cost per booked demo",
+        "Subscriber growth",
+        "Return on ad spend",
+    ]
+    AB_VARIANTS = [
+        "Hook positioning",
+        "CTA framing",
+        "Offer depth",
+        "Visual treatment",
+        "Social proof order",
+    ]
+    EXCLUSION_RULES = [
+        "Exclude existing customers",
+        "Exclude current partners",
+        "Exclude employee lists",
+        "Exclude low LTV cohorts",
+        "Exclude recent purchasers",
+    ]
+
+    def execute(self) -> Dict[str, Any]:
+        start = time.monotonic()
         self.ensure_budget(30.0)
-        return {"segments": 4, "personas": 3}
+
+        run = self.context.run
+        session = self.context.session
+
+        emit_log(
+            session,
+            run.id,
+            "Loading processed positioning outputs for audience synthesis",
+        )
+        processed_payload = self._load_processed_payload(run)
+        artifacts = processed_payload.get("artifacts", {})
+
+        emit_log(
+            session,
+            run.id,
+            "Synthesising quota-compliant audience records",
+        )
+        records, metadata = self._generate_records(run, artifacts)
+
+        qa_result = validate_audience_quotas(records)
+        if qa_result.is_blocker():
+            raise ValueError(
+                f"Audience generation failed quota validation: {qa_result.message}"
+            )
+
+        emit_log(
+            session,
+            run.id,
+            "Persisting audience master CSV",
+            metadata={"rows": len(records)},
+        )
+        csv_path = write_records(self.OUTPUT_PATH, records)
+        asset = self._register_asset(csv_path, len(records))
+
+        latency = time.monotonic() - start
+
+        telemetry = {
+            "csv_path": str(csv_path),
+            "records": records,
+            "row_count": len(records),
+            "dedupe": metadata["dedupe"],
+            "coverage": metadata["coverage"],
+            "gaps": metadata["gaps"],
+            "deficits": metadata["gaps"],
+            "qa": qa_result.to_dict(),
+            "asset_id": str(asset.id),
+            "andronoma_stage_latency_seconds": round(latency, 3),
+        }
+
+        return telemetry
+
+    # ------------------------------------------------------------------
+    # Payload loading utilities
+    # ------------------------------------------------------------------
+    def _load_processed_payload(self, run) -> Dict[str, Any]:
+        run_id = run.id
+        candidate = self.PROCESSED_ROOT / str(run_id) / "processing.json"
+        if candidate.exists():
+            try:
+                return json.loads(candidate.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+                raise ValueError(
+                    f"Processing payload for run {run_id} is not valid JSON"
+                ) from exc
+        telemetry = run.telemetry or {}
+        process_data = telemetry.get("process", {})
+        if process_data:
+            return process_data if isinstance(process_data, dict) else {}
+        raise FileNotFoundError(
+            f"Processing artifacts missing for run {run_id}; audiences stage cannot continue"
+        )
+
+    # ------------------------------------------------------------------
+    # Record generation helpers
+    # ------------------------------------------------------------------
+    def _generate_records(
+        self, run, artifacts: Mapping[str, Any]
+    ) -> Tuple[List[Mapping[str, Any]], Dict[str, Any]]:
+        personas = self._persona_pool(run)
+        motivations = self._motivation_pool(artifacts)
+        blockers = self._blocker_pool(artifacts)
+        if not blockers:
+            blockers = ["uncertainty"]
+        angles = self._angle_pool(artifacts)
+        concepts = self._concept_pool(artifacts)
+        proofs = self._proof_pool(artifacts)
+        format_notes = self.FORMAT_NOTES or ["Meta Advantage+ campaign"]
+        metrics = self.SUCCESS_METRICS or ["Return on ad spend"]
+        ab_variants = self.AB_VARIANTS or ["Hook positioning"]
+        exclusions = self.EXCLUSION_RULES or ["Exclude existing customers"]
+
+        seed_context = self._seed_context(artifacts)
+        total_required = max(self.TARGET_RECORDS, self.MIN_RECORDS)
+        rows: List[OrderedDict[str, Any]] = []
+
+        blocker_cycle = cycle(blockers)
+        angle_cycle = cycle(angles)
+        concept_cycle = cycle(concepts)
+        proof_cycle = cycle(proofs)
+        format_cycle = cycle(format_notes)
+        metric_cycle = cycle(metrics)
+        ab_cycle = cycle(ab_variants)
+        exclusion_cycle = cycle(exclusions)
+
+        for index in range(total_required):
+            persona = personas[index % len(personas)]
+            motivation_key, motivation_statement = motivations[index % len(motivations)]
+            blocker_primary = next(blocker_cycle)
+            blocker_secondary = next(blocker_cycle)
+            blockers_text = (
+                f"{blocker_primary} | {blocker_secondary}"
+                if blocker_primary != blocker_secondary
+                else blocker_primary
+            )
+
+            angle = next(angle_cycle)
+            concept = next(concept_cycle)
+            proof = next(proof_cycle)
+            format_note = next(format_cycle)
+            metric = next(metric_cycle)
+            ab_variant = next(ab_cycle)
+            exclusion = next(exclusion_cycle)
+
+            motivation_label = motivation_key.title()
+            seed_terms = self._seed_terms(
+                persona, motivation_key, [blocker_primary, blocker_secondary], seed_context
+            )
+
+            record = OrderedDict()
+            for column in REQUIRED_AUDIENCE_COLUMNS:
+                record[column] = ""
+            record["#"] = index + 1
+            record["Audience Name"] = self._audience_name(
+                persona, motivation_label, index
+            )
+            record["Who They Are"] = (
+                f"{persona} who respond to {motivation_label.lower()} outcomes and {angle.lower()}."
+            )
+            record["Seed Terms"] = seed_terms
+            record["Primary Motivation"] = motivation_label
+            record["Top 2 Blockers"] = blockers_text
+            record["Message Angle"] = f"{motivation_label}: {angle}"
+            record["Creative Concept"] = concept
+            record["Format Notes"] = (
+                f"{format_note}. Spotlight {motivation_label.lower()} proof points."
+            )
+            record["Proof/Offer"] = proof
+            record["Success Metric"] = metric
+            record["A/B Variable"] = ab_variant
+            record["Exclusions"] = exclusion
+
+            rows.append(record)
+
+        deduped_records, dedupe_meta = self._dedupe(rows)
+        if len(deduped_records) < self.MIN_RECORDS:
+            raise ValueError(
+                "Audience dedupe process dropped below minimum quota; generation config insufficient"
+            )
+        coverage_meta, gaps = self._coverage(deduped_records, motivations, blockers)
+
+        metadata = {
+            "dedupe": dedupe_meta,
+            "coverage": coverage_meta,
+            "gaps": gaps,
+        }
+        return deduped_records, metadata
+
+    def _persona_pool(self, run) -> List[str]:
+        config = run.input_payload.get("config", {}) if run else {}
+        personas = [
+            persona.strip()
+            for persona in config.get("target_markets", [])
+            if isinstance(persona, str) and persona.strip()
+        ]
+        if personas:
+            return personas
+        telemetry = run.telemetry or {}
+        fallback = []
+        process_docs = telemetry.get("process", {}).get("source_documents") if telemetry else None
+        if isinstance(process_docs, list):
+            for doc in process_docs:
+                title = doc.get("title") if isinstance(doc, dict) else None
+                if isinstance(title, str) and title.strip():
+                    fallback.append(title.strip())
+        if fallback:
+            return fallback[: len(self.DEFAULT_PERSONAS)]
+        return self.DEFAULT_PERSONAS
+
+    def _motivation_pool(
+        self, artifacts: Mapping[str, Any]
+    ) -> List[Tuple[str, str]]:
+        motivation_map = artifacts.get("motivation_map", {}) if artifacts else {}
+        pool: List[Tuple[str, str]] = []
+        for key, payload in motivation_map.items():
+            insights = payload.get("insights", []) if isinstance(payload, Mapping) else []
+            statement = ""
+            for insight in insights:
+                text = insight.get("statement") if isinstance(insight, Mapping) else None
+                if text:
+                    statement = text
+                    break
+            if not statement:
+                intensity = payload.get("intensity", "") if isinstance(payload, Mapping) else ""
+                statement = f"{key.title()} motivation with {intensity.lower()} intensity".strip()
+            pool.append((str(key), statement))
+        if pool:
+            return pool
+        return [
+            ("functional", "Operational buyers seeking efficiency gains"),
+            ("emotional", "Leaders wanting confidence their team is supported"),
+            ("aspirational", "Executives chasing category leadership"),
+            ("social", "Community builders who amplify peer proof"),
+        ]
+
+    def _blocker_pool(self, artifacts: Mapping[str, Any]) -> List[str]:
+        blockers = []
+        for record in artifacts.get("blockers_ranking", []) or []:
+            blocker = record.get("blocker") if isinstance(record, Mapping) else None
+            if blocker:
+                blockers.append(str(blocker))
+        if blockers:
+            return blockers
+        return ["uncertainty", "cost", "integration", "time", "trust"]
+
+    def _angle_pool(self, artifacts: Mapping[str, Any]) -> List[str]:
+        brand = artifacts.get("brand_position", {}) if artifacts else {}
+        angles: List[str] = []
+        category = brand.get("category", {}) if isinstance(brand, Mapping) else {}
+        category_statement = category.get("statement") if isinstance(category, Mapping) else None
+        if category_statement:
+            angles.append(category_statement)
+        promise = brand.get("promise", {}) if isinstance(brand, Mapping) else {}
+        promise_statement = promise.get("statement") if isinstance(promise, Mapping) else None
+        if promise_statement:
+            angles.append(promise_statement)
+        for differentiator in brand.get("differentiators", []) or []:
+            if isinstance(differentiator, Mapping):
+                statement = differentiator.get("statement")
+                if statement:
+                    angles.append(statement)
+        if not angles:
+            angles = [
+                "Lead with proof that outcomes are guaranteed",
+                "Contrast the status quo against automated workflows",
+                "Reinforce community validation to overcome doubt",
+            ]
+        return angles
+
+    def _concept_pool(self, artifacts: Mapping[str, Any]) -> List[str]:
+        market = artifacts.get("market_summary", {}) if artifacts else {}
+        concepts: List[str] = []
+        whitespace = market.get("whitespace_opportunities", []) if isinstance(market, Mapping) else []
+        for entry in whitespace or []:
+            if isinstance(entry, Mapping):
+                statement = entry.get("statement")
+                if statement:
+                    concepts.append(f"Whitespace push: {statement}")
+        cultural = market.get("cultural_signals", []) if isinstance(market, Mapping) else []
+        for entry in cultural or []:
+            if isinstance(entry, Mapping):
+                statement = entry.get("statement")
+                if statement:
+                    concepts.append(f"Culture tap: {statement}")
+        if not concepts:
+            concepts = [
+                "Use narrative proof contrasting old vs new way",
+                "UGC testimonial stitched with data overlay",
+                "Product walkthrough emphasising ease",
+                "Founder POV on mission and community",
+            ]
+        return concepts
+
+    def _proof_pool(self, artifacts: Mapping[str, Any]) -> List[str]:
+        brand = artifacts.get("brand_position", {}) if artifacts else {}
+        proofs: List[str] = []
+        for pillar in brand.get("proof_pillars", []) or []:
+            if isinstance(pillar, Mapping):
+                statement = pillar.get("statement")
+                if statement:
+                    proofs.append(statement)
+        value = brand.get("value_framing", {}) if isinstance(brand, Mapping) else {}
+        framing_statement = value.get("statement") if isinstance(value, Mapping) else None
+        if framing_statement:
+            proofs.append(framing_statement)
+        if not proofs:
+            proofs = [
+                "Leverage testimonial quoting quantified ROI",
+                "Offer live demo with onboarding concierge",
+                "Feature free trial with guided setup",
+            ]
+        return proofs
+
+    def _seed_context(self, artifacts: Mapping[str, Any]) -> List[str]:
+        brand = artifacts.get("brand_position", {}) if artifacts else {}
+        context_terms: List[str] = []
+        category = brand.get("category", {}) if isinstance(brand, Mapping) else {}
+        category_statement = category.get("statement") if isinstance(category, Mapping) else ""
+        promise = brand.get("promise", {}) if isinstance(brand, Mapping) else {}
+        promise_statement = promise.get("statement") if isinstance(promise, Mapping) else ""
+        for statement in [category_statement, promise_statement]:
+            context_terms.extend(self._keyword_slice(statement))
+        for differentiator in brand.get("differentiators", []) or []:
+            if isinstance(differentiator, Mapping):
+                context_terms.extend(self._keyword_slice(differentiator.get("statement", "")))
+        return context_terms[:10]
+
+    def _seed_terms(
+        self,
+        persona: str,
+        motivation_key: str,
+        blockers: Sequence[str],
+        context_terms: Sequence[str],
+    ) -> str:
+        tokens: List[str] = []
+        tokens.extend(self._keyword_slice(persona))
+        tokens.append(motivation_key.lower())
+        for blocker in blockers:
+            tokens.extend(self._keyword_slice(blocker))
+        tokens.extend(term.lower() for term in context_terms)
+        unique: List[str] = []
+        for token in tokens:
+            cleaned = token.strip().lower()
+            if cleaned and cleaned not in unique:
+                unique.append(cleaned)
+        return ", ".join(unique[:6])
+
+    def _keyword_slice(self, text: str | None) -> List[str]:
+        if not text:
+            return []
+        cleaned = re.findall(r"[a-zA-Z0-9]+", text)
+        return [token.lower() for token in cleaned[:4]]
+
+    def _audience_name(self, persona: str, motivation: str, index: int) -> str:
+        base = persona.split(" ")[:3]
+        base_name = " ".join(base).strip()
+        if not base_name:
+            base_name = "Audience"
+        return f"{base_name} · {motivation} #{index + 1:02d}"
+
+    def _dedupe(
+        self, records: Sequence[Mapping[str, Any]]
+    ) -> Tuple[List[Mapping[str, Any]], Dict[str, Any]]:
+        seen: Dict[str, Mapping[str, Any]] = {}
+        duplicates: List[str] = []
+        for record in records:
+            name = str(record.get("Audience Name", "")).strip().lower()
+            if name in seen:
+                duplicates.append(record.get("Audience Name", ""))
+                continue
+            seen[name] = record
+        deduped = list(seen.values())
+        metadata = {
+            "initial_candidates": len(records),
+            "final_count": len(deduped),
+            "duplicates_removed": len(records) - len(deduped),
+            "duplicate_names": sorted({dup for dup in duplicates if dup}),
+        }
+        return deduped, metadata
+
+    def _coverage(
+        self,
+        records: Sequence[Mapping[str, Any]],
+        motivations: Sequence[Tuple[str, str]],
+        blockers: Sequence[str],
+    ) -> Tuple[Dict[str, Any], List[str]]:
+        motivation_counts: Counter[str] = Counter()
+        blocker_counts: Counter[str] = Counter()
+        for record in records:
+            motivation_counts[record.get("Primary Motivation", "")] += 1
+            blockers_field = record.get("Top 2 Blockers", "")
+            for blocker in blockers_field.split("|"):
+                normalized = blocker.strip()
+                if normalized:
+                    blocker_counts[normalized] += 1
+        motivation_labels = [key.title() for key, _ in motivations]
+        gaps: List[str] = []
+        total = len(records)
+        if motivation_labels:
+            expected = max(1, int(total * self.GAP_THRESHOLD_MOTIVATION / max(len(motivation_labels), 1)))
+            for label in motivation_labels:
+                if motivation_counts.get(label, 0) < expected:
+                    gaps.append(
+                        f"Motivation '{label}' has limited coverage ({motivation_counts.get(label, 0)} < {expected})."
+                    )
+        if blockers:
+            expected_blocker = max(1, int(total * self.GAP_THRESHOLD_BLOCKER / max(len(blockers), 1)))
+            for blocker in blockers:
+                if blocker_counts.get(blocker, 0) < expected_blocker:
+                    gaps.append(
+                        f"Blocker '{blocker}' appears infrequently ({blocker_counts.get(blocker, 0)} < {expected_blocker})."
+                    )
+
+        coverage = {
+            "motivation_counts": dict(motivation_counts),
+            "blocker_counts": dict(blocker_counts),
+            "total_records": total,
+        }
+        return coverage, gaps
+
+    def _register_asset(self, path: Path, rows: int) -> AssetRecord:
+        session = self.context.session
+        asset = AssetRecord(
+            id=uuid.uuid4(),
+            run_id=self.context.run.id,
+            stage=self.name,
+            asset_type="csv",
+            storage_key=str(path),
+            extra={"rows": rows, "name": "audiences_master"},
+        )
+        session.add(asset)
+        session.commit()
+        session.refresh(asset)
+        return asset
