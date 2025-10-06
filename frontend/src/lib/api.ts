@@ -2,6 +2,47 @@ const API_URL = (globalThis as any).__API_URL__ as string;
 
 type RequestOptions = RequestInit & { token?: string | null };
 
+export type StageStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+export interface StageTelemetry {
+  name: string;
+  status: StageStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  telemetry: Record<string, unknown>;
+  budget_spent: number;
+  notes: string;
+}
+
+export interface Run {
+  id: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  input_payload: Record<string, unknown> | null;
+  budgets: Record<string, number> | null;
+  telemetry: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+  stages: StageTelemetry[];
+}
+
+export interface RunListResponse {
+  runs: Run[];
+}
+
+export interface AssetRecord {
+  id: string;
+  run_id: string;
+  stage: string;
+  asset_type: string;
+  storage_key: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AssetListResponse {
+  assets: AssetRecord[];
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers: HeadersInit = {
     "Content-Type": "application/json",
@@ -43,15 +84,15 @@ export async function registerRequest(email: string, password: string) {
 }
 
 export async function listRuns(token: string) {
-  return request<{ runs: any[] }>("/runs", { token });
+  return request<RunListResponse>("/runs", { token });
 }
 
 export async function createRun(token: string, payload: any) {
-  return request("/runs", { method: "POST", token, body: JSON.stringify(payload) });
+  return request<Run>("/runs", { method: "POST", token, body: JSON.stringify(payload) });
 }
 
 export async function startRun(token: string, id: string) {
-  return request(`/runs/${id}/start`, { method: "POST", token });
+  return request<Run>(`/runs/${id}/start`, { method: "POST", token });
 }
 
 export async function getPipeline(token: string | null) {
@@ -60,4 +101,12 @@ export async function getPipeline(token: string | null) {
 
 export async function getSettings(token: string | null) {
   return request<Record<string, unknown>>("/settings", { token: token ?? undefined });
+}
+
+export async function getRun(token: string, id: string) {
+  return request<Run>(`/runs/${id}`, { token });
+}
+
+export async function listRunAssets(token: string, id: string) {
+  return request<AssetListResponse>(`/runs/${id}/assets`, { token });
 }

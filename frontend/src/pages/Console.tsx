@@ -3,18 +3,7 @@ import { useEffect, useState } from "react";
 import StageBadge from "../components/StageBadge";
 import { useAuth } from "../hooks/useAuth";
 import { listRuns, startRun } from "../lib/api";
-
-type Stage = {
-  name: string;
-  status: string;
-};
-
-type Run = {
-  id: string;
-  status: string;
-  created_at: string;
-  stages: Stage[];
-};
+import type { Run } from "../lib/api";
 
 export default function Console() {
   const { token } = useAuth();
