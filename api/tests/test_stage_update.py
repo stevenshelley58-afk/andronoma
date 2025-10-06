@@ -284,6 +284,71 @@ def test_update_stage_telemetry_creates_run_entry(
         app.dependency_overrides.pop(get_current_user, None)
 
 
+def test_update_stage_telemetry_replaces_non_mapping_run_entry(
+    client: TestClient,
+    seeded_stage: SeededStage,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    owner = User(
+        id=seeded_stage.owner_id,
+        email="owner@example.com",
+        password_hash="hash",
+    )
+    app.dependency_overrides[get_current_user] = lambda: owner
+
+    run_id = uuid4()
+    stage_id = uuid4()
+    stage_name = "ads"
+
+    async def seed_stage_with_non_mapping() -> None:
+        async with session_factory() as session:
+            run = PipelineRun(
+                id=run_id,
+                owner_id=seeded_stage.owner_id,
+                status=RunStatus.RUNNING,
+                input_payload={},
+                budgets={},
+                telemetry={stage_name: "unexpected", "other": {"keep": True}},
+            )
+            stage = StageState(
+                id=stage_id,
+                run_id=run_id,
+                name=stage_name,
+                status=StageStatus.PENDING,
+                telemetry={},
+                budget_spent=0.0,
+                notes="",
+            )
+            session.add_all([run, stage])
+            await session.commit()
+
+    asyncio.run(seed_stage_with_non_mapping())
+
+    try:
+        response = client.patch(
+            f"/runs/{run_id}/stages/{stage_name}",
+            json={"telemetry": {"metric": 1}},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["telemetry"] == {"metric": 1}
+
+        async def fetch_state() -> tuple[StageState | None, PipelineRun | None]:
+            async with session_factory() as session:
+                stage_state = await session.get(StageState, stage_id)
+                run_state = await session.get(PipelineRun, run_id)
+                return stage_state, run_state
+
+        stage_state, run_state = asyncio.run(fetch_state())
+        assert stage_state is not None
+        assert stage_state.telemetry == {"metric": 1}
+        assert run_state is not None
+        assert run_state.telemetry[stage_name] == {"metric": 1}
+        assert run_state.telemetry["other"] == {"keep": True}
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
 def test_update_stage_rejects_negative_budget(
     client: TestClient,
     seeded_stage: SeededStage,
