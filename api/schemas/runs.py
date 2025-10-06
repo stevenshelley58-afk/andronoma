@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, validator
@@ -61,15 +61,15 @@ class StageUpdateRequest(BaseModel):
             raise ValueError("Notes cannot be empty")
         return value
 
-    @validator("telemetry")
+    @validator("telemetry", pre=True)
     def telemetry_must_be_object(
-        cls, value: Dict[str, Any] | None
+        cls, value: Dict[str, Any] | Mapping[str, Any] | None
     ) -> Dict[str, Any] | None:
         if value is None:
             return value
-        if not isinstance(value, dict):
+        if not isinstance(value, Mapping):
             raise ValueError("Telemetry updates must be an object")
-        return value
+        return dict(value)
 
     @validator("budget_spent")
     def budget_spent_must_be_non_negative(cls, value: float | None) -> float | None:

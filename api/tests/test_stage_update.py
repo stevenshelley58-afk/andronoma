@@ -439,6 +439,32 @@ def test_update_stage_rejects_negative_budget(
         app.dependency_overrides.pop(get_current_user, None)
 
 
+def test_update_stage_rejects_non_object_telemetry(
+    client: TestClient,
+    seeded_stage: SeededStage,
+) -> None:
+    owner = User(
+        id=seeded_stage.owner_id,
+        email="owner@example.com",
+        password_hash="hash",
+    )
+    app.dependency_overrides[get_current_user] = lambda: owner
+
+    try:
+        response = client.patch(
+            f"/runs/{seeded_stage.run_id}/stages/{seeded_stage.stage_name}",
+            json={"telemetry": []},
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert any(
+            error.get("msg") == "Telemetry updates must be an object"
+            for error in body.get("detail", [])
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
 def test_update_stage_rejects_unauthorized_user(
     client: TestClient, seeded_stage: SeededStage
 ) -> None:
