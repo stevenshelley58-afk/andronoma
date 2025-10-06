@@ -50,7 +50,7 @@ class BaseStage(abc.ABC):
             state = StageState(id=uuid.uuid4(), run_id=self.context.run.id, name=self.name)
             session.add(state)
             self.context.run.stages.append(state)
-        now = dt.datetime.utcnow()
+        now = dt.datetime.now(dt.UTC)
         if status == StageStatus.RUNNING:
             state.started_at = now
         if status in {StageStatus.COMPLETED, StageStatus.FAILED, StageStatus.SKIPPED}:

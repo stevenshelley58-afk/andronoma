@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import AsyncIterator
 from uuid import UUID, uuid4
@@ -102,7 +102,7 @@ async def seed_run(
             user = User(id=owner_id, email=email, password_hash="hash")
             session.add(user)
 
-        now = datetime.utcnow() - timedelta(hours=1)
+        now = datetime.now(UTC) - timedelta(hours=1)
         run = PipelineRun(
             id=run_id,
             owner_id=owner_id,
@@ -139,7 +139,7 @@ def test_cancel_run_success(
     run_id = uuid4()
     owner_email = f"{owner_id}@example.com"
 
-    stage_started = datetime.utcnow() - timedelta(minutes=30)
+    stage_started = datetime.now(UTC) - timedelta(minutes=30)
 
     asyncio.run(
         seed_run(
@@ -150,7 +150,7 @@ def test_cancel_run_success(
             stages=[
                 ("scrape", StageStatus.PENDING, None, None),
                 ("process", StageStatus.RUNNING, stage_started, None),
-                ("qa", StageStatus.COMPLETED, stage_started, datetime.utcnow()),
+                ("qa", StageStatus.COMPLETED, stage_started, datetime.now(UTC)),
             ],
             owner_email=owner_email,
         )
@@ -236,7 +236,14 @@ def test_cancel_run_invalid_status(
             owner_id=owner_id,
             run_id=run_id,
             status=RunStatus.COMPLETED,
-            stages=[("scrape", StageStatus.COMPLETED, datetime.utcnow(), datetime.utcnow())],
+            stages=[
+                (
+                    "scrape",
+                    StageStatus.COMPLETED,
+                    datetime.now(UTC),
+                    datetime.now(UTC),
+                )
+            ],
             owner_email=owner_email,
         )
     )

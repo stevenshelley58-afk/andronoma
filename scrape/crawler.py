@@ -51,8 +51,10 @@ class CrawlerResponse:
         timestamp = (
             dt.datetime.fromisoformat(str(fetched_at))
             if isinstance(fetched_at, str)
-            else dt.datetime.utcnow()
+            else dt.datetime.now(dt.UTC)
         )
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=dt.UTC)
         return cls(
             url=str(payload.get("url")),
             status=int(payload.get("status", 0)),
@@ -217,7 +219,7 @@ class PlaywrightCrawler:
             status=status,
             body=body,
             headers=headers,
-            fetched_at=dt.datetime.utcnow(),
+            fetched_at=dt.datetime.now(dt.UTC),
             latency=0.0,
             from_cache=False,
         )
@@ -234,7 +236,7 @@ class PlaywrightCrawler:
             status=resp.status_code,
             body=resp.text,
             headers=dict(resp.headers),
-            fetched_at=dt.datetime.utcnow(),
+            fetched_at=dt.datetime.now(dt.UTC),
             latency=0.0,
             from_cache=False,
         )

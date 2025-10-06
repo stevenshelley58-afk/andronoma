@@ -119,7 +119,7 @@ class ProcessStage(BaseStage):
             motivation_map,
         )
 
-        generated_at = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
+        generated_at = dt.datetime.now(dt.UTC)
         result_bundle = {
             "run_id": str(run.id),
             "generated_at": generated_at.isoformat(),

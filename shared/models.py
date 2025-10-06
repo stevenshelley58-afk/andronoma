@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Dict
 
 from sqlalchemy import JSON, Column, DateTime, Enum, Float, ForeignKey, String, Text
@@ -33,13 +33,19 @@ class StageStatus(str, enum.Enum):
     SKIPPED = "skipped"
 
 
+def _utcnow() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+
+    return datetime.now(UTC)
+
+
 class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     email = Column(String(320), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     tokens = relationship("SessionToken", back_populates="user")
 
@@ -50,7 +56,7 @@ class SessionToken(Base):
     id = Column(UUID(as_uuid=True), primary_key=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     token = Column(String(128), nullable=False, unique=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     user = relationship("User", back_populates="tokens")
 
@@ -64,8 +70,8 @@ class PipelineRun(Base):
     input_payload = Column(JSON, default=dict, nullable=False)
     budgets = Column(JSON, default=dict, nullable=False)
     telemetry = Column(MutableDict.as_mutable(JSON), default=dict, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     owner = relationship("User")
     stages = relationship("StageState", back_populates="run", cascade="all, delete-orphan")
@@ -79,8 +85,8 @@ class StageState(Base):
     run_id = Column(UUID(as_uuid=True), ForeignKey("pipeline_runs.id"), nullable=False)
     name = Column(String(64), nullable=False)
     status = Column(Enum(StageStatus), default=StageStatus.PENDING, nullable=False)
-    started_at = Column(DateTime)
-    finished_at = Column(DateTime)
+    started_at = Column(DateTime(timezone=True))
+    finished_at = Column(DateTime(timezone=True))
     telemetry = Column(MutableDict.as_mutable(JSON), default=dict, nullable=False)
     budget_spent = Column(Float, default=0.0, nullable=False)
     notes = Column(Text, default="")
@@ -93,7 +99,7 @@ class RunLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True)
     run_id = Column(UUID(as_uuid=True), ForeignKey("pipeline_runs.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     level = Column(String(16), default="info", nullable=False)
     message = Column(Text, nullable=False)
     data = Column("metadata", JSON, default=dict, nullable=False)
@@ -110,7 +116,7 @@ class AssetRecord(Base):
     asset_type = Column(String(32), nullable=False)
     storage_key = Column(String(512), nullable=False)
     extra = Column(JSON, default=dict, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     run = relationship("PipelineRun")
 

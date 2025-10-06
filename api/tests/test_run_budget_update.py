@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import AsyncIterator
 from uuid import UUID, uuid4
@@ -78,7 +78,7 @@ def session_factory() -> async_sessionmaker[AsyncSession]:
 def seeded_run(session_factory: async_sessionmaker[AsyncSession]) -> SeededRun:
     owner_id = uuid4()
     run_id = uuid4()
-    initial_updated_at = datetime.utcnow() - timedelta(hours=1)
+    initial_updated_at = datetime.now(UTC) - timedelta(hours=1)
 
     async def seed() -> None:
         async with session_factory() as session:
@@ -139,7 +139,13 @@ def test_update_run_budgets_success(
         refreshed_run = asyncio.run(fetch_run())
         assert refreshed_run is not None
         assert refreshed_run.budgets == new_budgets
-        assert refreshed_run.updated_at > seeded_run.initial_updated_at
+        updated_at = refreshed_run.updated_at
+        initial_updated_at = seeded_run.initial_updated_at
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=UTC)
+        if initial_updated_at.tzinfo is None:
+            initial_updated_at = initial_updated_at.replace(tzinfo=UTC)
+        assert updated_at > initial_updated_at
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 
