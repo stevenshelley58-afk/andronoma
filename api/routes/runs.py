@@ -219,10 +219,14 @@ async def get_run_detail(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> RunResponse:
-    run = await session.get(PipelineRun, run_id)
+    result = await session.execute(
+        select(PipelineRun)
+        .options(selectinload(PipelineRun.stages))
+        .where(PipelineRun.id == run_id)
+    )
+    run = result.scalar_one_or_none()
     if not run or run.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
-    await session.refresh(run)
     return serialize_run(run)
 
 
@@ -284,6 +288,9 @@ async def update_stage(
         stage.notes = payload.notes
         updated = True
 
+    stage_status_changed = False
+    new_stage_status: StageStatus | None = None
+
     if payload.status is not None:
         current_status = stage.status
         if payload.status != current_status:
@@ -299,6 +306,8 @@ async def update_stage(
                 stage.started_at = now
             if payload.status in {StageStatus.COMPLETED, StageStatus.FAILED, StageStatus.SKIPPED}:
                 stage.finished_at = now
+            stage_status_changed = True
+            new_stage_status = payload.status
             updated = True
 
     if payload.telemetry is not None:
@@ -332,7 +341,23 @@ async def update_stage(
         updated = True
 
     if updated:
-        run.updated_at = datetime.utcnow()
+        now = datetime.utcnow()
+        run.updated_at = now
+        if stage_status_changed:
+            await session.flush()
+            if new_stage_status == StageStatus.FAILED:
+                run.status = RunStatus.FAILED
+            else:
+                result = await session.execute(
+                    select(StageState.status).where(StageState.run_id == run.id)
+                )
+                stage_statuses = set(result.scalars().all())
+                if StageStatus.RUNNING in stage_statuses:
+                    run.status = RunStatus.RUNNING
+                elif stage_statuses and stage_statuses.issubset(
+                    {StageStatus.COMPLETED, StageStatus.SKIPPED}
+                ):
+                    run.status = RunStatus.COMPLETED
         await session.commit()
         await session.refresh(stage)
         await session.refresh(run)

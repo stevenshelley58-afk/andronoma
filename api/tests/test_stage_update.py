@@ -132,6 +132,43 @@ def client(session_factory: async_sessionmaker[AsyncSession]) -> TestClient:
     app.dependency_overrides.pop(get_db, None)
 
 
+def create_run_with_stage(
+    session_factory: async_sessionmaker[AsyncSession],
+    owner_id: UUID,
+    *,
+    run_status: RunStatus = RunStatus.PENDING,
+    stage_status: StageStatus = StageStatus.PENDING,
+) -> tuple[UUID, str]:
+    run_id = uuid4()
+    stage_id = uuid4()
+    stage_name = f"stage-{run_id.hex[:8]}"
+
+    async def seed() -> None:
+        async with session_factory() as session:
+            run = PipelineRun(
+                id=run_id,
+                owner_id=owner_id,
+                status=run_status,
+                input_payload={},
+                budgets={},
+                telemetry={},
+            )
+            stage = StageState(
+                id=stage_id,
+                run_id=run_id,
+                name=stage_name,
+                status=stage_status,
+                telemetry={},
+                budget_spent=0.0,
+                notes="",
+            )
+            session.add_all([run, stage])
+            await session.commit()
+
+    asyncio.run(seed())
+    return run_id, stage_name
+
+
 def test_update_stage_notes(client: TestClient, seeded_stage: SeededStage) -> None:
     owner = User(
         id=seeded_stage.owner_id,
@@ -353,6 +390,48 @@ def test_update_stage_telemetry_replaces_non_mapping_run_entry(
         app.dependency_overrides.pop(get_current_user, None)
 
 
+def test_stage_status_running_updates_run_status(
+    client: TestClient,
+    seeded_stage: SeededStage,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id, stage_name = create_run_with_stage(
+        session_factory,
+        seeded_stage.owner_id,
+        run_status=RunStatus.PENDING,
+        stage_status=StageStatus.PENDING,
+    )
+
+    owner = User(
+        id=seeded_stage.owner_id,
+        email="owner@example.com",
+        password_hash="hash",
+    )
+    app.dependency_overrides[get_current_user] = lambda: owner
+
+    try:
+        response = client.patch(
+            f"/runs/{run_id}/stages/{stage_name}",
+            json={"status": StageStatus.RUNNING.value},
+        )
+        assert response.status_code == 200
+
+        run_response = client.get(f"/runs/{run_id}")
+        assert run_response.status_code == 200
+        run_payload = run_response.json()
+        assert run_payload["status"] == RunStatus.RUNNING.value
+
+        async def fetch_run() -> PipelineRun | None:
+            async with session_factory() as session:
+                return await session.get(PipelineRun, run_id)
+
+        db_run = asyncio.run(fetch_run())
+        assert db_run is not None
+        assert db_run.status == RunStatus.RUNNING
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
 def test_update_stage_budget_creates_run_entry(
     client: TestClient,
     seeded_stage: SeededStage,
@@ -414,6 +493,90 @@ def test_update_stage_budget_creates_run_entry(
         assert run_state is not None
         assert run_state.telemetry[stage_name] == {"budget_spent": 9.75}
         assert run_state.telemetry["other"] == {"keep": True}
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_stage_status_failed_updates_run_status(
+    client: TestClient,
+    seeded_stage: SeededStage,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id, stage_name = create_run_with_stage(
+        session_factory,
+        seeded_stage.owner_id,
+        run_status=RunStatus.RUNNING,
+        stage_status=StageStatus.RUNNING,
+    )
+
+    owner = User(
+        id=seeded_stage.owner_id,
+        email="owner@example.com",
+        password_hash="hash",
+    )
+    app.dependency_overrides[get_current_user] = lambda: owner
+
+    try:
+        response = client.patch(
+            f"/runs/{run_id}/stages/{stage_name}",
+            json={"status": StageStatus.FAILED.value},
+        )
+        assert response.status_code == 200
+
+        run_response = client.get(f"/runs/{run_id}")
+        assert run_response.status_code == 200
+        run_payload = run_response.json()
+        assert run_payload["status"] == RunStatus.FAILED.value
+
+        async def fetch_run() -> PipelineRun | None:
+            async with session_factory() as session:
+                return await session.get(PipelineRun, run_id)
+
+        db_run = asyncio.run(fetch_run())
+        assert db_run is not None
+        assert db_run.status == RunStatus.FAILED
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_stage_status_completed_updates_run_status(
+    client: TestClient,
+    seeded_stage: SeededStage,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id, stage_name = create_run_with_stage(
+        session_factory,
+        seeded_stage.owner_id,
+        run_status=RunStatus.RUNNING,
+        stage_status=StageStatus.RUNNING,
+    )
+
+    owner = User(
+        id=seeded_stage.owner_id,
+        email="owner@example.com",
+        password_hash="hash",
+    )
+    app.dependency_overrides[get_current_user] = lambda: owner
+
+    try:
+        response = client.patch(
+            f"/runs/{run_id}/stages/{stage_name}",
+            json={"status": StageStatus.COMPLETED.value},
+        )
+        assert response.status_code == 200
+
+        run_response = client.get(f"/runs/{run_id}")
+        assert run_response.status_code == 200
+        run_payload = run_response.json()
+        assert run_payload["status"] == RunStatus.COMPLETED.value
+
+        async def fetch_run() -> PipelineRun | None:
+            async with session_factory() as session:
+                return await session.get(PipelineRun, run_id)
+
+        db_run = asyncio.run(fetch_run())
+        assert db_run is not None
+        assert db_run.status == RunStatus.COMPLETED
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 
