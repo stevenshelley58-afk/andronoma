@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "name": "andronoma-mcp",
+  "description": "MCP server that wraps the Andronoma Playwright crawler.",
+  "server_url": "http://localhost:8080/mcp",
+  "capabilities": {
+    "streaming": {
+      "protocol": "streamable-http",
+      "version": "0.1"
+    }
+  },
+  "tools": [
+    {
+      "name": "fetch_html",
+      "description": "Fetch a single URL and return status, headers, and HTML body.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Fully-qualified URL to fetch"
+          }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "crawl_once",
+      "description": "Fetch a URL and return structured metadata parsed from the HTML response.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Fully-qualified URL to crawl"
+          }
+        },
+        "required": ["url"]
+      }
+    }
+  ]
+}
